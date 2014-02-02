@@ -1,0 +1,15 @@
+#
+# Kexec for locked bootloaders on Sony Xperia Devices
+#
+
+menuconfig KEXEC_MODULE
+	bool "Kexec for locked bootloaders on Sony Xperia Devices"
+	depends on !KEXEC
+	default no
+
+if KEXEC_MODULE
+
+source "drivers/misc/kexec_mod/procfs/Kconfig"
+source "drivers/misc/kexec_mod/kexec/Kconfig"
+
+endif # KEXEC_MODULE
