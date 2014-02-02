@@ -101,6 +101,10 @@ struct kimage {
 #define KEXEC_TYPE_CRASH   1
 	unsigned int preserve_context : 1;
 
+#ifdef CONFIG_KEXEC_HARDBOOT
+	unsigned int hardboot : 1;
+#endif
+
 #ifdef ARCH_HAS_KIMAGE_ARCH
 	struct kimage_arch arch;
 #endif
@@ -167,6 +171,9 @@ extern struct atomic_notifier_head crash_percpu_notifier_list;
 
 #define KEXEC_ON_CRASH		0x00000001
 #define KEXEC_PRESERVE_CONTEXT	0x00000002
+#ifdef CONFIG_KEXEC_HARDBOOT
+#define KEXEC_HARDBOOT		0x00000004
+#endif
 #define KEXEC_ARCH_MASK		0xffff0000
 
 /* These values match the ELF architecture values.
@@ -188,7 +195,7 @@ extern struct atomic_notifier_head crash_percpu_notifier_list;
 #ifndef CONFIG_KEXEC_JUMP
 #define KEXEC_FLAGS    KEXEC_ON_CRASH
 #else
-#define KEXEC_FLAGS    (KEXEC_ON_CRASH | KEXEC_PRESERVE_CONTEXT)
+#define KEXEC_FLAGS    (KEXEC_ON_CRASH | KEXEC_PRESERVE_CONTEXT | KEXEC_HARDBOOT)
 #endif
 
 #define VMCOREINFO_BYTES           (4096)
