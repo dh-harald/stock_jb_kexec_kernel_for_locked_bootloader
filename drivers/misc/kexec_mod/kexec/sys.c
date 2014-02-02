@@ -54,6 +54,12 @@ static struct notifier_block dummy_notifier_reboot = {
 
 BLOCKING_NOTIFIER_HEAD(notifier_head);
 
+extern int __blocking_notifier_call_chain(struct blocking_notifier_head *nh,
+				   unsigned long val, void *v,
+				   int nr_to_call, int *nr_calls);
+
+extern int blocking_notifier_call_chain(struct blocking_notifier_head *nh,
+		unsigned long val, void *v);
 
 void kernel_restart_prepare(char *cmd)
 {

@@ -1567,3 +1567,5 @@ int kernel_kexec(void)
 	mutex_unlock(&kexec_mutex);
 	return error;
 }
+
+MODULE_LICENSE("GPL");
