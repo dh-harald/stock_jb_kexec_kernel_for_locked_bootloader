@@ -45,12 +45,111 @@
 #include <linux/module.h>	/* Specifically, a module */
 #include <linux/cdev.h>
 
+/* KEXEC SYSFS */
+
+#include <linux/kobject.h>
+#include <linux/string.h>
+#include <linux/sysfs.h>
+#include <linux/init.h>
+
+#define KERNEL_ATTRR_RO(_name) \
+static struct kobj_attribute _name##_attr = __ATTR_RO(_name)
+
+#define KERNEL_ATTRR_RW(_name) \
+static struct kobj_attribute _name##_attr = \
+	__ATTR(_name, 0644, _name##_show, _name##_store)
+
+static ssize_t kexec_loaded_show(struct kobject *kobj,
+				 struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", !!kexec_image);
+}
+KERNEL_ATTRR_RO(kexec_loaded);
+
+static ssize_t kexec_crash_loaded_show(struct kobject *kobj,
+				       struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", !!kexec_crash_image);
+}
+KERNEL_ATTRR_RO(kexec_crash_loaded);
+
+static ssize_t kexec_crash_size_show(struct kobject *kobj,
+				       struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%zu\n", crash_get_memory_size());
+}
+static ssize_t kexec_crash_size_store(struct kobject *kobj,
+				   struct kobj_attribute *attr,
+				   const char *buf, size_t count)
+{
+	unsigned long cnt;
+	int ret;
+
+	if (strict_strtoul(buf, 0, &cnt))
+		return -EINVAL;
+
+	ret = crash_shrink_memory(cnt);
+	return ret < 0 ? ret : count;
+}
+KERNEL_ATTRR_RW(kexec_crash_size);
+
+static ssize_t vmcoreinfo_show(struct kobject *kobj,
+			       struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%lx %x\n",
+		       paddr_vmcoreinfo_note(),
+		       (unsigned int)vmcoreinfo_max_size);
+}
+KERNEL_ATTRR_RO(vmcoreinfo);
+
+static struct attribute *attrs[] = {
+	&kexec_loaded_attr.attr,
+	&kexec_crash_loaded_attr.attr,
+	&kexec_crash_size_attr.attr,
+	&vmcoreinfo_attr.attr,
+	NULL,
+};
+
+static struct attribute_group attr_group = {
+	.attrs = attrs,
+};
+
+static struct kobject *ksysfs_for_kexec;
+
+static int __init ksysfs_for_kexec_init(void)
+{
+	int error = 0;
+
+	ksysfs_for_kexec = kobject_get(kernel_kobj);
+
+	if (!ksysfs_for_kexec) {
+		printk("Kexec: Failed to get kernel sysfs!\n");
+		error = -1;
+		goto exit;
+	}
+
+	error = sysfs_create_group(ksysfs_for_kexec, &attr_group);
+	if (error)
+		printk("Kexec: failed to create sysfs interfaces!\n");
+	else
+		printk("Kexec: sysfs interfaces created sucesfully.\n");
+
+exit:
+	return error;
+}
+
+/* KEXEC SYSFS END */
+
 int cpu_architecture(void)
 {
 	int cpu_arch = CPU_ARCH_ARMv7;
 
 	return cpu_arch;
 }
+
+/* original and new reboot syscall */
+asmlinkage long (*original_reboot)(int magic1, int magic2, unsigned int cmd, void __user *arg);
+extern asmlinkage long reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
 
 /* Per cpu memory for storing cpu states in case of system crash. */
 note_buf_t __percpu *crash_notes;
@@ -954,15 +1053,18 @@ struct kimage *kexec_crash_image;
 
 static DEFINE_MUTEX(kexec_mutex);
 
-SYSCALL_DEFINE4(kexec_load, unsigned long, entry, unsigned long, nr_segments,
-		struct kexec_segment __user *, segments, unsigned long, flags)
+asmlinkage long kexec_load(unsigned long entry, unsigned long nr_segments,
+				 struct kexec_segment __user *segments, unsigned long flags)
 {
 	struct kimage **dest_image, *image;
 	int result;
+	printk("Kexec: - Starting kexec_load...\n");
 
 	/* We only trust the superuser with rebooting the system. */
-	if (!capable(CAP_SYS_BOOT))
+	if (!capable(CAP_SYS_BOOT)) {
+		printk("Kexec: - capable(CAP_SYS_BOOT) : '%d'\n",capable(CAP_SYS_BOOT));
 		return -EPERM;
+	}
 
 	/*
 	 * Verify we have a legal set of flags
@@ -973,8 +1075,10 @@ SYSCALL_DEFINE4(kexec_load, unsigned long, entry, unsigned long, nr_segments,
 
 	/* Verify we are on the appropriate architecture */
 	if (((flags & KEXEC_ARCH_MASK) != KEXEC_ARCH) &&
-		((flags & KEXEC_ARCH_MASK) != KEXEC_ARCH_DEFAULT))
+		((flags & KEXEC_ARCH_MASK) != KEXEC_ARCH_DEFAULT)) {
+		printk("Kexec: - Bad appropriate architecture \n");
 		return -EINVAL;
+	}
 
 	/* Put an artificial cap on the number
 	 * of segments passed to kexec_load.
@@ -1041,6 +1145,8 @@ SYSCALL_DEFINE4(kexec_load, unsigned long, entry, unsigned long, nr_segments,
 out:
 	mutex_unlock(&kexec_mutex);
 	kimage_free(image);
+
+	printk("Kexec: - ---- kexec_load - result : '%d'\n",result );
 
 	return result;
 }
@@ -1226,20 +1332,6 @@ void crash_save_cpu(struct pt_regs *regs, int cpu)
 		      	      &prstatus, sizeof(prstatus));
 	final_note(buf);
 }
-
-static int __init crash_notes_memory_init(void)
-{
-	/* Allocate memory for saving cpu registers. */
-	crash_notes = alloc_percpu(note_buf_t);
-	if (!crash_notes) {
-		printk("Kexec: Memory allocation for saving cpu register"
-		" states failed\n");
-		return -ENOMEM;
-	}
-	return 0;
-}
-module_init(crash_notes_memory_init)
-
 
 /*
  * parsing the "crashkernel" commandline
@@ -1567,5 +1659,207 @@ int kernel_kexec(void)
 	mutex_unlock(&kexec_mutex);
 	return error;
 }
+
+/*
+ * Remplacement de "syscall" - Par Delewer
+ * Novembre 2013
+ */
+static int major = 100; // By default
+module_param(major, int, 0);
+MODULE_PARM_DESC(major, "major number");
+static int reg_chrdev_ret;
+static struct kexec_driver_struct {
+	void *KDS_entry;
+	int KDS_nr_segments;
+	struct kexec_segment __user *KDS_segment;
+	unsigned long KDS_kexec_flags;
+};
+static struct kexec_driver_struct *kexec_driver_contener;
+static char *kexec_memory_buffer;
+static int buf_size=sizeof(struct kexec_driver_struct);
+static int length_of_buffer = 0;
+static char output[] = "Kexec_load driver implemented ! \nKexec_load module communication granted.\nYou can send kernel by this communication channel.\nType following commands for help\n  => echo help >/dev/kexec_driver\n  => dmesg | grep Kexec\n";
+
+static ssize_t kexec_read_function(struct file *file, char *buf, size_t count, loff_t *ppos) {
+	if (output[*ppos] == '\0')
+		return 0;
+	copy_to_user(buf, &output[*ppos], 1);
+	*ppos += 1;
+	return 1;
+}
+
+static void xperia_reboot(void) {
+	asm(
+		"ldr r0,soft_reset_addr\n\t"
+		"	mov r1, #1\n\t"
+		"	str r1, [r0]\n\t"
+		"\n\t"
+		"soft_reset_addr:\n\t"
+		"	.word 0x80157228"
+	);
+}
+
+static ssize_t kexec_write_function(struct file *file, const char *buf, size_t count, loff_t *ppos) {
+	length_of_buffer = 0;
+
+	if (count <= buf_size - (int)*ppos)
+		length_of_buffer = count;
+	else
+		length_of_buffer = buf_size - (int)*ppos;
+
+	if (length_of_buffer)
+		copy_from_user((int *)kexec_memory_buffer + (int)*ppos, buf, length_of_buffer);
+	if (length_of_buffer)
+		copy_from_user((int *)kexec_driver_contener + (int)*ppos, buf, length_of_buffer);
+
+	if (!strncmp(kexec_memory_buffer,"boot",4)) {
+		printk(KERN_WARNING "Kexec:-----------------------------------------------------\n");
+		printk(KERN_WARNING "Kexec: REBOOT DEVICE !!!\n");
+		#define LINUX_REBOOT_MAGIC1	0xfee1dead
+		#define LINUX_REBOOT_MAGIC2	672274793
+		#define LINUX_REBOOT_CMD_KEXEC	0x45584543
+		reboot(LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_KEXEC, 0);
+		//xperia_reboot();
+		goto end_write;
+	}
+
+	printk(KERN_WARNING "Kexec: KDS_entry : '%lx'\n",kexec_driver_contener->KDS_entry);
+	printk(KERN_WARNING "Kexec: KDS_nr_segments : '%d'\n",kexec_driver_contener->KDS_nr_segments);
+	printk(KERN_WARNING "Kexec: KDS_segment : '%lx'\n",kexec_driver_contener->KDS_segment);
+	printk(KERN_WARNING "Kexec: KDS_kexec_flags : '%lx'\n",kexec_driver_contener->KDS_kexec_flags);
+
+	sprintf(output,"%ld", kexec_load(kexec_driver_contener->KDS_entry, kexec_driver_contener->KDS_nr_segments,
+					 kexec_driver_contener->KDS_segment, kexec_driver_contener->KDS_kexec_flags));
+
+end_write:
+	*ppos += length_of_buffer;
+	return length_of_buffer;
+}
+
+static int kexec_open_function(struct inode *inode, struct file *file) {
+	return 0;
+}
+
+static int kexec_close_function(struct inode *inode, struct file *file) {
+	return 0;
+}
+
+static struct file_operations fops = {
+	owner: THIS_MODULE,
+	read: kexec_read_function,
+	write: kexec_write_function,
+	open: kexec_open_function,
+	release: kexec_close_function
+};
+
+static void __exit kexec_module_cleanup(void) {
+	unregister_chrdev(major, "kexec_driver");
+	if (kexec_memory_buffer)
+		kfree(kexec_memory_buffer);
+
+	sysfs_remove_group(kernel_kobj, &attr_group);
+	printk("Kexec: sysfs interfaces removed sucesfully.\n");
+}
+
+static int __init kexec_module(void) {
+	printk("Kexec: Starting kexec_module...\n");
+
+	/* create kexec sysfs interfaces */
+	ksysfs_for_kexec_init();
+
+	reg_chrdev_ret=register_chrdev(major, "kexec_driver", &fops);
+	if(reg_chrdev_ret < 0) {
+		printk(KERN_WARNING "Kexec: major number declaration issu...\n");
+		printk(KERN_WARNING "Kexec: see /proc/devices to found a free major,\n");
+		printk(KERN_WARNING "Kexec: and restart with following command :\n");
+		printk(KERN_WARNING "Kexec: => insmod kexec_load <major number>\n");
+		return reg_chrdev_ret;
+	}
+	printk(KERN_INFO "Kexec: kexec_driver_contener allocation\n");
+	kexec_driver_contener = kmalloc(sizeof(struct kexec_driver_struct), GFP_KERNEL);
+	printk(KERN_INFO "Kexec: kexec_memory_buffer allocation\n");
+	kexec_memory_buffer = kmalloc(buf_size, GFP_KERNEL);
+	if(!kexec_memory_buffer) {
+		unregister_chrdev(major, "kexec_driver");
+		reg_chrdev_ret = -ENOMEM;
+		if (kexec_memory_buffer)
+			kfree(kexec_memory_buffer);
+		return reg_chrdev_ret;
+	}
+	printk(KERN_WARNING "Kexec:----------------------------------------------------\n");
+	printk(KERN_WARNING "Kexec: kexec_driver created with major : '%d'\n",major);
+	printk(KERN_WARNING "Kexec: Please, prepare by typing the following commands :\n");
+	printk(KERN_WARNING "Kexec:  => mknod /dev/kexec_driver c %d 0\n",major);
+	printk(KERN_WARNING "Kexec:  => cat /dev/kexec_driver\n");
+	printk(KERN_WARNING "Kexec:-----------------------------------------------------\n");
+	printk(KERN_WARNING "Kexec:  For help\n");
+	printk(KERN_WARNING "Kexec:  => echo help >/dev/kexec_driver\n");
+	printk(KERN_WARNING "Kexec:-----------------------------------------------------\n");
+
+	/* crash_notes_memory_init */
+	/* Allocate memory for saving cpu registers. */
+	crash_notes = alloc_percpu(note_buf_t);
+	if (!crash_notes) {
+		printk("Kexec: Memory allocation for saving cpu register"
+			" states failed\n");
+		return -ENOMEM;
+	}
+
+	/* crash_vmcoreinfo_init */
+	VMCOREINFO_OSRELEASE(init_uts_ns.name.release);
+	VMCOREINFO_PAGESIZE(PAGE_SIZE);
+
+	VMCOREINFO_SYMBOL(init_uts_ns);
+	VMCOREINFO_SYMBOL(node_online_map);
+
+#ifndef CONFIG_NEED_MULTIPLE_NODES
+	VMCOREINFO_SYMBOL(mem_map);
+	VMCOREINFO_SYMBOL(contig_page_data);
+#endif
+#ifdef CONFIG_SPARSEMEM
+	VMCOREINFO_SYMBOL(mem_section);
+	VMCOREINFO_LENGTH(mem_section, NR_SECTION_ROOTS);
+	VMCOREINFO_STRUCT_SIZE(mem_section);
+	VMCOREINFO_OFFSET(mem_section, section_mem_map);
+#endif
+	VMCOREINFO_STRUCT_SIZE(page);
+	VMCOREINFO_STRUCT_SIZE(pglist_data);
+	VMCOREINFO_STRUCT_SIZE(zone);
+	VMCOREINFO_STRUCT_SIZE(free_area);
+	VMCOREINFO_STRUCT_SIZE(list_head);
+	VMCOREINFO_SIZE(nodemask_t);
+	VMCOREINFO_OFFSET(page, flags);
+	VMCOREINFO_OFFSET(page, _count);
+	VMCOREINFO_OFFSET(page, mapping);
+	VMCOREINFO_OFFSET(page, lru);
+	VMCOREINFO_OFFSET(pglist_data, node_zones);
+	VMCOREINFO_OFFSET(pglist_data, nr_zones);
+#ifdef CONFIG_FLAT_NODE_MEM_MAP
+	VMCOREINFO_OFFSET(pglist_data, node_mem_map);
+#endif
+	VMCOREINFO_OFFSET(pglist_data, node_start_pfn);
+	VMCOREINFO_OFFSET(pglist_data, node_spanned_pages);
+	VMCOREINFO_OFFSET(pglist_data, node_id);
+	VMCOREINFO_OFFSET(zone, free_area);
+	VMCOREINFO_OFFSET(zone, vm_stat);
+	VMCOREINFO_OFFSET(zone, spanned_pages);
+	VMCOREINFO_OFFSET(free_area, free_list);
+	VMCOREINFO_OFFSET(list_head, next);
+	VMCOREINFO_OFFSET(list_head, prev);
+	VMCOREINFO_OFFSET(vm_struct, addr);
+	VMCOREINFO_LENGTH(zone.free_area, MAX_ORDER);
+	VMCOREINFO_LENGTH(free_area.free_list, MIGRATE_TYPES);
+	VMCOREINFO_NUMBER(NR_FREE_PAGES);
+	VMCOREINFO_NUMBER(PG_lru);
+	VMCOREINFO_NUMBER(PG_private);
+	VMCOREINFO_NUMBER(PG_swapcache);
+
+	arch_crash_save_vmcoreinfo();
+
+	return 0;
+}
+
+module_init(kexec_module);
+module_exit(kexec_module_cleanup);
 
 MODULE_LICENSE("GPL");
