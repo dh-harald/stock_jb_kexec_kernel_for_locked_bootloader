@@ -1570,13 +1570,11 @@ void smp_send_stop_k(void)
 		pr_warning("SMP: failed to stop secondary CPUs\n");
 }
 
-void machine_shutdown_k(void)
-{
-#ifdef CONFIG_SMP
-	smp_send_stop_k();
+#if defined(CONFIG_MACH_U8500_LOTUS) || defined(CONFIG_MACH_U8500_PEPPER) || defined(CONFIG_MACH_U8500_NYPON) || defined(CONFIG_MACH_U8500_KUMQUAT)
+void (*machine_shutdown_k)(void) = (void *)0xc006077c;
+#else
+#error please searh in cat /proc/kallsyms for machine_shutdown!! If you can not see offsets, than do echo 1 > /proc/sys/kernel/kptr_restrict
 #endif
-}
-
 extern void kernel_restart_prepare_k(char *cmd);
 
 /*
