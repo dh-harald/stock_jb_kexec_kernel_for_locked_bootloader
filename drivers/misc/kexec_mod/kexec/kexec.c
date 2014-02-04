@@ -147,10 +147,6 @@ int cpu_architecture(void)
 	return cpu_arch;
 }
 
-/* original and new reboot syscall */
-asmlinkage long (*original_reboot)(int magic1, int magic2, unsigned int cmd, void __user *arg);
-extern asmlinkage long reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
-
 /* Per cpu memory for storing cpu states in case of system crash. */
 note_buf_t __percpu *crash_notes;
 
@@ -1581,6 +1577,8 @@ void machine_shutdown_k(void)
 #endif
 }
 
+extern void kernel_restart_prepare_k(char *cmd);
+
 /*
  * Move into place and start executing a preloaded standalone
  * executable.  If nothing was preloaded return an error.
@@ -1629,7 +1627,7 @@ int kernel_kexec(void)
 	} else
 #endif
 	{
-		kernel_restart_prepare(NULL);
+		kernel_restart_prepare_k(NULL);
 		printk(KERN_EMERG "Starting new kernel\n");
 		machine_shutdown_k();
 	}
@@ -1699,6 +1697,8 @@ static void xperia_reboot(void) {
 	);
 }
 
+extern asmlinkage long kexec_call_reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
+
 static ssize_t kexec_write_function(struct file *file, const char *buf, size_t count, loff_t *ppos) {
 	length_of_buffer = 0;
 
@@ -1715,10 +1715,7 @@ static ssize_t kexec_write_function(struct file *file, const char *buf, size_t c
 	if (!strncmp(kexec_memory_buffer,"boot",4)) {
 		printk(KERN_WARNING "Kexec:-----------------------------------------------------\n");
 		printk(KERN_WARNING "Kexec: REBOOT DEVICE !!!\n");
-		#define LINUX_REBOOT_MAGIC1	0xfee1dead
-		#define LINUX_REBOOT_MAGIC2	672274793
-		#define LINUX_REBOOT_CMD_KEXEC	0x45584543
-		reboot(LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_KEXEC, 0);
+		kexec_call_reboot(LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_KEXEC, 0);
 		//xperia_reboot();
 		goto end_write;
 	}

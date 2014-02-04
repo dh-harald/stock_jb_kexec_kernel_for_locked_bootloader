@@ -257,11 +257,6 @@ static int __die(const char *str, int err, struct thread_info *thread, struct pt
 
 static DEFINE_SPINLOCK(die_lock);
 
-#ifdef CONFIG_KEXEC_MODULE
-void crash_kexec(struct pt_regs *regs) { }
-int kexec_should_crash(struct task_struct *p) { return 0; }
-#endif
-
 /*
  * This function is protected against re-entrancy.
  */
@@ -277,8 +272,10 @@ void die(const char *str, struct pt_regs *regs, int err)
 	bust_spinlocks(1);
 	ret = __die(str, err, thread, regs);
 
+#ifndef CONFIG_KEXEC_MODULE
 	if (regs && kexec_should_crash(thread->task))
 		crash_kexec(regs);
+#endif
 
 	bust_spinlocks(0);
 	add_taint(TAINT_DIE);
