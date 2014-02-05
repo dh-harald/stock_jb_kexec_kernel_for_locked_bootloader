@@ -2007,7 +2007,7 @@ asmlinkage long kexec_load(unsigned long entry, unsigned long nr_segments,
 				 struct kexec_segment __user *segments, unsigned long flags)
 {
 	struct kimage **dest_image, *image;
-	int result;
+	int result, i;
 	printk("Kexec: - Starting kexec_load...\n");
 
 	/* We only trust the superuser with rebooting the system. */
@@ -2097,7 +2097,11 @@ out:
 	kimage_free(image);
 
 	printk("Kexec: - ---- kexec_load - result : '%d'\n",result );
-
+/*
+	for (i=0; i<0x10000; ++i) {
+		printk("0x%.2X", readb(0x1FF00000 + i));
+	}
+*/
 	return result;
 }
 

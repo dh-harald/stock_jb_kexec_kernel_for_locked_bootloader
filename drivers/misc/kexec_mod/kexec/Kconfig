@@ -1,6 +1,6 @@
 config KEXEC_LOAD
 	tristate "kexec module"
-	depends on KEXEC_MODULE && PROCFS_RW && !KEXEC
+	depends on KEXEC_MODULE && !KEXEC
 	default m
 	help
 	  This option create a kexec module.
