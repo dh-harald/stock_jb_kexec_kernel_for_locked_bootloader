@@ -1037,7 +1037,6 @@ __initcall(memblock_init_debugfs);
 	40080000-40081fff : lcla_esram
 	80004000-80004fff : nmk-i2c.0
 */
-//#define CRASH_LOGS_START 0x1FF00000
 #define KEXEC_HARDBOOT_START	0x1FF00000
 #define KEXEC_HARDBOOT_SIZE	(0x1FFE0000 - KEXEC_HARDBOOT_START)
 
@@ -1056,20 +1055,17 @@ static struct platform_device kexec_hardboot_device = {
 
 static void kexec_hardboot_reserve(void) {
 	memblock_init();
-	//memblock_dump_all();
 
 	if (memblock_reserve(KEXEC_HARDBOOT_START, KEXEC_HARDBOOT_SIZE)) {
 		printk(KERN_ERR "Failed to reserve memory for KEXEC_HARDBOOT: "
-				 "%dM@0x%.8X\n",
-				 KEXEC_HARDBOOT_SIZE / SZ_1M, KEXEC_HARDBOOT_START);
+				 "with size 0x%X at 0x%.8X\n",
+				 KEXEC_HARDBOOT_SIZE, KEXEC_HARDBOOT_START);
 		return;
 	}
-	/*if (memblock_remove(0x1FE00000, 0x100000)) {
-		printk(KERN_ERR "Failed to free memory for KEXEC_HARDBOOT: "
-				 "%dM@0x%.8X\n",
-				 SZ_1M, 0x1FE00000);
-	}
-	return;*/
+	else
+		printk("Kexec hardboot mem space with size 0x%X at 0x%.8X allocated successful.\n",
+				 KEXEC_HARDBOOT_SIZE, KEXEC_HARDBOOT_START);
+
 	memblock_free(KEXEC_HARDBOOT_START, KEXEC_HARDBOOT_SIZE);
 	memblock_remove(KEXEC_HARDBOOT_START, KEXEC_HARDBOOT_SIZE);
 
@@ -1077,7 +1073,7 @@ static void kexec_hardboot_reserve(void) {
 	kexec_hardboot_device.resource       = kexec_hardboot_resources;
 }
 
-static struct platform_device *kexec_devs[] __initdata = {
+static struct platform_device *kexec_devs[] = {
 	&kexec_hardboot_device,
 };
 #endif
@@ -2706,9 +2702,9 @@ static int __init kexec_module(void) {
 	/* create kexec sysfs interfaces */
 	ksysfs_for_kexec_init();
 
+	/* alocate mem space for kexec hardboot atags */
 	platform_add_devices(kexec_devs,
 				ARRAY_SIZE(kexec_devs));
-	/* alocate mem space for kexec hardboot atags */
 	kexec_hardboot_reserve();
 
 	reg_chrdev_ret=register_chrdev(major, "kexec_driver", &fops);
