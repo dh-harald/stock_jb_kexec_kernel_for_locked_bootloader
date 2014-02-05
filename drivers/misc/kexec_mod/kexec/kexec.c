@@ -45,6 +45,20 @@
 #include <linux/module.h>	/* Specifically, a module */
 #include <linux/cdev.h>
 
+#include <linux/printk.h>
+
+/* Syscall table */
+void **sys_call_table;
+
+/* original and new reboot syscall */
+//asmlinkage long (*original_reboot)(int magic1, int magic2, unsigned int cmd, void __user *arg);
+//extern asmlinkage long reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
+
+#ifdef KEXEC_FLAGS
+#undef KEXEC_FLAGS
+#define KEXEC_FLAGS    (KEXEC_ON_CRASH | KEXEC_PRESERVE_CONTEXT | KEXEC_HARDBOOT)
+#endif
+
 /* KEXEC SYSFS */
 
 #include <linux/kobject.h>
@@ -2481,35 +2495,6 @@ unsigned long __attribute__ ((weak)) paddr_vmcoreinfo_note(void)
 	return __pa((unsigned long)(char *)&vmcoreinfo_note);
 }
 
-#define IPI_CPU_STOP	1
-
-static void (*smp_cross_call_k)(const struct cpumask *, unsigned int);
-
-void __init set_smp_cross_call_k(void (*fn)(const struct cpumask *, unsigned int))
-{
-	smp_cross_call_k = fn;
-}
-
-void smp_send_stop_k(void)
-{
-	unsigned long timeout;
-
-	if (num_online_cpus() > 1) {
-		cpumask_t mask = cpu_online_map;
-		cpu_clear(smp_processor_id(), mask);
-
-		smp_cross_call_k(&mask, IPI_CPU_STOP);
-	}
-
-	/* Wait up to one second for other CPUs to stop */
-	timeout = USEC_PER_SEC;
-	while (num_online_cpus() > 1 && timeout--)
-		udelay(1);
-
-	if (num_online_cpus() > 1)
-		pr_warning("SMP: failed to stop secondary CPUs\n");
-}
-
 #if defined(CONFIG_MACH_U8500_LOTUS) || defined(CONFIG_MACH_U8500_PEPPER) || defined(CONFIG_MACH_U8500_NYPON) || defined(CONFIG_MACH_U8500_KUMQUAT)
 void (*machine_shutdown_k)(void) = (void *)0xc006077c;
 #else
@@ -2595,35 +2580,7 @@ Unlock:
 	mutex_unlock(&kexec_mutex);
 	return error;
 }
-
 /*
- * Remplacement de "syscall" - Par Delewer
- * Novembre 2013
- */
-static int major = 100; // By default
-module_param(major, int, 0);
-MODULE_PARM_DESC(major, "major number");
-static int reg_chrdev_ret;
-static struct kexec_driver_struct {
-	void *KDS_entry;
-	int KDS_nr_segments;
-	struct kexec_segment __user *KDS_segment;
-	unsigned long KDS_kexec_flags;
-};
-static struct kexec_driver_struct *kexec_driver_contener;
-static char *kexec_memory_buffer;
-static int buf_size=sizeof(struct kexec_driver_struct);
-static int length_of_buffer = 0;
-static char output[] = "Kexec_load driver implemented ! \nKexec_load module communication granted.\nYou can send kernel by this communication channel.\nType following commands for help\n  => echo help >/dev/kexec_driver\n  => dmesg | grep Kexec\n";
-
-static ssize_t kexec_read_function(struct file *file, char *buf, size_t count, loff_t *ppos) {
-	if (output[*ppos] == '\0')
-		return 0;
-	copy_to_user(buf, &output[*ppos], 1);
-	*ppos += 1;
-	return 1;
-}
-
 static void xperia_reboot(void) {
 	asm(
 		"ldr r0,soft_reset_addr\n\t"
@@ -2634,69 +2591,16 @@ static void xperia_reboot(void) {
 		"	.word 0x80157228"
 	);
 }
-
+*/
 extern asmlinkage long kexec_call_reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
-
-static ssize_t kexec_write_function(struct file *file, const char *buf, size_t count, loff_t *ppos) {
-	length_of_buffer = 0;
-
-	if (count <= buf_size - (int)*ppos)
-		length_of_buffer = count;
-	else
-		length_of_buffer = buf_size - (int)*ppos;
-
-	if (length_of_buffer)
-		copy_from_user((int *)kexec_memory_buffer + (int)*ppos, buf, length_of_buffer);
-	if (length_of_buffer)
-		copy_from_user((int *)kexec_driver_contener + (int)*ppos, buf, length_of_buffer);
-
-	if (!strncmp(kexec_memory_buffer,"boot",4)) {
-		printk(KERN_WARNING "Kexec:-----------------------------------------------------\n");
-		printk(KERN_WARNING "Kexec: REBOOT DEVICE !!!\n");
-		kexec_call_reboot(LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_KEXEC, 0);
-		//xperia_reboot();
-		goto end_write;
-	}
-
-	printk(KERN_WARNING "Kexec: KDS_entry : '%lx'\n",kexec_driver_contener->KDS_entry);
-	printk(KERN_WARNING "Kexec: KDS_nr_segments : '%d'\n",kexec_driver_contener->KDS_nr_segments);
-	printk(KERN_WARNING "Kexec: KDS_segment : '%lx'\n",kexec_driver_contener->KDS_segment);
-	printk(KERN_WARNING "Kexec: KDS_kexec_flags : '%lx'\n",kexec_driver_contener->KDS_kexec_flags);
-
-	sprintf(output,"%ld", kexec_load(kexec_driver_contener->KDS_entry, kexec_driver_contener->KDS_nr_segments,
-					 kexec_driver_contener->KDS_segment, kexec_driver_contener->KDS_kexec_flags));
-
-end_write:
-	*ppos += length_of_buffer;
-	return length_of_buffer;
-}
-
-static int kexec_open_function(struct inode *inode, struct file *file) {
-	return 0;
-}
-
-static int kexec_close_function(struct inode *inode, struct file *file) {
-	return 0;
-}
-
-static struct file_operations fops = {
-	owner: THIS_MODULE,
-	read: kexec_read_function,
-	write: kexec_write_function,
-	open: kexec_open_function,
-	release: kexec_close_function
-};
-
+/*
 static void __exit kexec_module_cleanup(void) {
-	unregister_chrdev(major, "kexec_driver");
-	if (kexec_memory_buffer)
-		kfree(kexec_memory_buffer);
-
 	sysfs_remove_group(kernel_kobj, &attr_group);
 	printk("Kexec: sysfs interfaces removed sucesfully.\n");
 }
-
-static int __init kexec_module(void) {
+*/
+static int __init kexec_module_init(void)
+{
 	printk("Kexec: Starting kexec_module...\n");
 
 	/* create kexec sysfs interfaces */
@@ -2707,34 +2611,15 @@ static int __init kexec_module(void) {
 				ARRAY_SIZE(kexec_devs));
 	kexec_hardboot_reserve();
 
-	reg_chrdev_ret=register_chrdev(major, "kexec_driver", &fops);
-	if(reg_chrdev_ret < 0) {
-		printk(KERN_WARNING "Kexec: major number declaration issu...\n");
-		printk(KERN_WARNING "Kexec: see /proc/devices to found a free major,\n");
-		printk(KERN_WARNING "Kexec: and restart with following command :\n");
-		printk(KERN_WARNING "Kexec: => insmod kexec_load <major number>\n");
-		return reg_chrdev_ret;
-	}
-	printk(KERN_INFO "Kexec: kexec_driver_contener allocation\n");
-	kexec_driver_contener = kmalloc(sizeof(struct kexec_driver_struct), GFP_KERNEL);
-	printk(KERN_INFO "Kexec: kexec_memory_buffer allocation\n");
-	kexec_memory_buffer = kmalloc(buf_size, GFP_KERNEL);
-	if(!kexec_memory_buffer) {
-		unregister_chrdev(major, "kexec_driver");
-		reg_chrdev_ret = -ENOMEM;
-		if (kexec_memory_buffer)
-			kfree(kexec_memory_buffer);
-		return reg_chrdev_ret;
-	}
-	printk(KERN_WARNING "Kexec:----------------------------------------------------\n");
-	printk(KERN_WARNING "Kexec: kexec_driver created with major : '%d'\n",major);
-	printk(KERN_WARNING "Kexec: Please, prepare by typing the following commands :\n");
-	printk(KERN_WARNING "Kexec:  => mknod /dev/kexec_driver c %d 0\n",major);
-	printk(KERN_WARNING "Kexec:  => cat /dev/kexec_driver\n");
-	printk(KERN_WARNING "Kexec:-----------------------------------------------------\n");
-	printk(KERN_WARNING "Kexec:  For help\n");
-	printk(KERN_WARNING "Kexec:  => echo help >/dev/kexec_driver\n");
-	printk(KERN_WARNING "Kexec:-----------------------------------------------------\n");
+	sys_call_table=(void **)0xc005f944;
+
+	/* Set kexec_load() syscall. */
+	sys_call_table[__NR_kexec_load]=kexec_load;
+
+	/* Swap reboot() syscall and store original */
+	//original_reboot=sys_call_table[__NR_reboot];
+	//sys_call_table[__NR_reboot]=reboot;
+	sys_call_table[__NR_reboot]=kexec_call_reboot;
 
 	/* crash_notes_memory_init */
 	/* Allocate memory for saving cpu registers. */
@@ -2745,7 +2630,6 @@ static int __init kexec_module(void) {
 		return -ENOMEM;
 	}
 
-	/* crash_vmcoreinfo_init */
 	VMCOREINFO_OSRELEASE(init_uts_ns.name.release);
 	VMCOREINFO_PAGESIZE(PAGE_SIZE);
 
@@ -2799,7 +2683,7 @@ static int __init kexec_module(void) {
 	return 0;
 }
 
-module_init(kexec_module);
-module_exit(kexec_module_cleanup);
+module_init(kexec_module_init);
+//module_exit(kexec_module_cleanup);
 
 MODULE_LICENSE("GPL");
