@@ -9,7 +9,6 @@ menuconfig KEXEC_MODULE
 
 if KEXEC_MODULE
 
-source "drivers/misc/kexec_mod/procfs/Kconfig"
 source "drivers/misc/kexec_mod/kexec/Kconfig"
 
 endif # KEXEC_MODULE
