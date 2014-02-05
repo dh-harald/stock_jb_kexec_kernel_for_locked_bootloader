@@ -132,6 +132,8 @@ static int __init init_atags_procfs(void)
 	tags_entry = create_proc_read_entry("atags", 0400,
 			NULL, read_buffer, b);
 
+	printk("Kexec: atags procfs\n");
+
 	if (!tags_entry)
 		goto nomem;
 
@@ -2094,7 +2096,7 @@ asmlinkage long kexec_load(unsigned long entry, unsigned long nr_segments,
 				 struct kexec_segment __user *segments, unsigned long flags)
 {
 	struct kimage **dest_image, *image;
-	int result, i;
+	int result;
 	printk("Kexec: - Starting kexec_load...\n");
 
 	/* We only trust the superuser with rebooting the system. */
