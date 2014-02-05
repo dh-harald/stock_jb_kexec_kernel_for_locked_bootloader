@@ -968,13 +968,7 @@ void __init memblock_init(void)
 	memblock.current_limit = MEMBLOCK_ALLOC_ANYWHERE;
 }
 
-static int __init early_memblock(char *p)
-{
-	if (p && strstr(p, "debug"))
-		memblock_debug = 1;
-	return 0;
-}
-//early_param("memblock", early_memblock);
+memblock_debug = 1;
 
 #if defined(CONFIG_DEBUG_FS) && !defined(ARCH_DISCARD_MEMBLOCK)
 
@@ -1029,9 +1023,23 @@ __initcall(memblock_init_debugfs);
 #include <linux/platform_device.h>
 #include <linux/memblock.h>
 #ifdef CONFIG_KEXEC_HARDBOOT
-#define CRASH_LOGS_START 0x1FF00000
-#define KEXEC_HARDBOOT_SIZE	(SZ_1M)
-#define KEXEC_HARDBOOT_START	(CRASH_LOGS_START - KEXEC_HARDBOOT_SIZE)
+/*
+	cat /proc/iomem
+	00000000-05ffffff : System RAM
+	00058000-008aae43 : Kernel text
+	008ac000-00ed44c7 : Kernel data
+	06000000-06efffff : db8500-trace-area
+	08000000-09ffffff : System RAM
+	0e800000-1fefffff : System RAM
+	1ffe0000-1fffffff : ram_console
+	40010000-400107ff : lcpa
+	40010000-400107ff : dma40 I/O lcpa
+	40080000-40081fff : lcla_esram
+	80004000-80004fff : nmk-i2c.0
+*/
+//#define CRASH_LOGS_START 0x1FF00000
+#define KEXEC_HARDBOOT_START	0x1FF00000
+#define KEXEC_HARDBOOT_SIZE	(0x1FFE0000 - KEXEC_HARDBOOT_START)
 
 static struct resource kexec_hardboot_resources[] = {
 	[0] = {
@@ -1047,18 +1055,31 @@ static struct platform_device kexec_hardboot_device = {
 };
 
 static void kexec_hardboot_reserve(void) {
+	memblock_init();
+	//memblock_dump_all();
+
 	if (memblock_reserve(KEXEC_HARDBOOT_START, KEXEC_HARDBOOT_SIZE)) {
 		printk(KERN_ERR "Failed to reserve memory for KEXEC_HARDBOOT: "
 				 "%dM@0x%.8X\n",
 				 KEXEC_HARDBOOT_SIZE / SZ_1M, KEXEC_HARDBOOT_START);
 		return;
 	}
+	/*if (memblock_remove(0x1FE00000, 0x100000)) {
+		printk(KERN_ERR "Failed to free memory for KEXEC_HARDBOOT: "
+				 "%dM@0x%.8X\n",
+				 SZ_1M, 0x1FE00000);
+	}
+	return;*/
 	memblock_free(KEXEC_HARDBOOT_START, KEXEC_HARDBOOT_SIZE);
 	memblock_remove(KEXEC_HARDBOOT_START, KEXEC_HARDBOOT_SIZE);
 
 	kexec_hardboot_device.num_resources  = ARRAY_SIZE(kexec_hardboot_resources);
 	kexec_hardboot_device.resource       = kexec_hardboot_resources;
 }
+
+static struct platform_device *kexec_devs[] __initdata = {
+	&kexec_hardboot_device,
+};
 #endif
 
 /* KEXEC HARDBOOT ATAGS SPACE END */
@@ -2685,6 +2706,8 @@ static int __init kexec_module(void) {
 	/* create kexec sysfs interfaces */
 	ksysfs_for_kexec_init();
 
+	platform_add_devices(kexec_devs,
+				ARRAY_SIZE(kexec_devs));
 	/* alocate mem space for kexec hardboot atags */
 	kexec_hardboot_reserve();
 
