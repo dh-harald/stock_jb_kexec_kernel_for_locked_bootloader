@@ -42,12 +42,11 @@
 #include <asm/sections.h>
 #include <linux/compiler.h>
 
-#include <linux/module.h>	/* Specifically, a module */
+#include <linux/module.h>
 #include <linux/cdev.h>
 
 #include <linux/printk.h>
 
-/* Syscall table */
 void **sys_call_table;
 
 /* original and new reboot syscall */
@@ -61,89 +60,68 @@ void **sys_call_table;
 
 /* ATAGS PROCFS */
 
-#include <linux/slab.h>
 #include <linux/proc_fs.h>
-#include <asm/setup.h>
-#include <asm/types.h>
-#include <asm/page.h>
 
-struct buffer {
-	size_t size;
-	char data[];
-};
+#define PROCFS_MAX_SIZE	1024
+#define PROCFS_NAME	"atags"
 
-static int
-read_buffer(char* page, char** start, off_t off, int count,
-	int* eof, void* data)
+static struct proc_dir_entry *atags;
+static char procfs_buffer[PROCFS_MAX_SIZE];
+static unsigned long procfs_buffer_size = 0;
+
+int procfile_read(char *buffer,
+			 char **buffer_location,
+			 off_t offset, int buffer_length, int *eof, void *data)
 {
-	struct buffer *buffer = (struct buffer *)data;
+	int ret;
+	printk(KERN_INFO "procfs_rw: procfile_read (/proc/%s) called\n", PROCFS_NAME);
 
-	if (off >= buffer->size) {
-		*eof = 1;
-		return 0;
+	if (offset > 0)
+		ret = 0;
+	else {
+		memcpy(buffer, procfs_buffer, procfs_buffer_size);
+		ret = procfs_buffer_size;
 	}
 
-	count = min((int) (buffer->size - off), count);
-
-	memcpy(page, &buffer->data[off], count);
-
-	return count;
+	return ret;
 }
 
-#define BOOT_PARAMS_SIZE 1536
-static char __initdata atags_copy[BOOT_PARAMS_SIZE];
-
-void __init save_atags(const struct tag *tags)
+int procfile_write(struct file *file, const char *buffer,
+			 unsigned long count, void *data)
 {
-	memcpy(atags_copy, tags, sizeof(atags_copy));
-}
-
-static int __init init_atags_procfs(void)
-{
-	/*
-	 * This cannot go into save_atags() because kmalloc and proc don't work
-	 * yet when it is called.
-	 */
-	struct proc_dir_entry *tags_entry;
-	struct tag *tag = (struct tag *)atags_copy;
-	struct buffer *b;
-	size_t size;
-
-	if (tag->hdr.tag != ATAG_CORE) {
-		printk(KERN_INFO "No ATAGs?");
-		return -EINVAL;
+	procfs_buffer_size = count;
+	if (procfs_buffer_size > PROCFS_MAX_SIZE ) {
+		procfs_buffer_size = PROCFS_MAX_SIZE;
 	}
 
-	for (; tag->hdr.size; tag = tag_next(tag))
-		;
+	if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size) ) {
+		return -EFAULT;
+	}
 
-	/* include the terminating ATAG_NONE */
-	size = (char *)tag - atags_copy + sizeof(struct tag_header);
+	return procfs_buffer_size;
+}
 
-	WARN_ON(tag->hdr.tag != ATAG_NONE);
+int init_atags_procfs(void)
+{
+	atags = create_proc_entry(PROCFS_NAME, 0644, NULL);
 
-	b = kmalloc(sizeof(*b) + size, GFP_KERNEL);
-	if (!b)
-		goto nomem;
+	if (atags == NULL) {
+		remove_proc_entry(PROCFS_NAME, NULL);
+		printk(KERN_ALERT "Error: Could not initialize /proc/%s\n",
+			PROCFS_NAME);
+		return -ENOMEM;
+	}
 
-	b->size = size;
-	memcpy(b->data, atags_copy, size);
+	atags->read_proc = procfile_read;
+	atags->write_proc = procfile_write;
+	//atags->owner = THIS_MODULE;
+	atags->mode	= S_IFREG | S_IRUGO;
+	atags->uid	= 0;
+	atags->gid	= 0;
+	atags->size	= 37;
 
-	tags_entry = create_proc_read_entry("atags", 0400,
-			NULL, read_buffer, b);
-
-	printk("Kexec: atags procfs\n");
-
-	if (!tags_entry)
-		goto nomem;
-
+	printk(KERN_INFO "procfs_rw: /proc/%s created\n", PROCFS_NAME);
 	return 0;
-
-nomem:
-	kfree(b);
-	printk(KERN_ERR "Exporting ATAGs: not enough memory\n");
-
-	return -ENOMEM;
 }
 
 /* ATAGS PROCFS END */
@@ -1140,8 +1118,9 @@ __initcall(memblock_init_debugfs);
 	40080000-40081fff : lcla_esram
 	80004000-80004fff : nmk-i2c.0
 */
-#define KEXEC_HARDBOOT_START	0x1FF00000
-#define KEXEC_HARDBOOT_SIZE	(0x1FFE0000 - KEXEC_HARDBOOT_START)
+/* lets try with wroking kexec hardboot address */
+#define KEXEC_HARDBOOT_START	0x1FE00000
+#define KEXEC_HARDBOOT_SIZE	(SZ_1M)
 
 static struct resource kexec_hardboot_resources[] = {
 	[0] = {
@@ -2586,10 +2565,12 @@ unsigned long __attribute__ ((weak)) paddr_vmcoreinfo_note(void)
 
 #if defined(CONFIG_MACH_U8500_LOTUS) || defined(CONFIG_MACH_U8500_PEPPER) || defined(CONFIG_MACH_U8500_NYPON) || defined(CONFIG_MACH_U8500_KUMQUAT)
 void (*machine_shutdown_k)(void) = (void *)0xc006077c;
+int (*usermodehelper_disable_k)(void) = (void *)0xc00b2b24;
+void (*syscore_shutdown_k)(void) = (void *)0xc02e2328;
+void (*kernel_restart_prepare_k)(char *cmd) = (void *)0xc00b0220;
 #else
-#error please searh in cat /proc/kallsyms for machine_shutdown!! If you can not see offsets, than do echo 1 > /proc/sys/kernel/kptr_restrict
+#error please searh in cat /proc/kallsyms for our things!! If you can not see offsets, than do echo 1 > /proc/sys/kernel/kptr_restrict
 #endif
-extern void kernel_restart_prepare_k(char *cmd);
 
 /*
  * Move into place and start executing a preloaded standalone

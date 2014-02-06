@@ -145,5 +145,6 @@ static int __init v6_userpage_init(void)
 
 	return 0;
 }
-
+#ifndef CONFIG_KEXEC_MODULE
 core_initcall(v6_userpage_init);
+#endif

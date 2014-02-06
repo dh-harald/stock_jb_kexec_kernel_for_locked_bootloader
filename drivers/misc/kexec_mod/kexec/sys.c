@@ -57,29 +57,6 @@
 static DEFINE_MUTEX(kexec_reboot_mutex);
 BLOCKING_NOTIFIER_HEAD(reboot_notifier_list);
 
-extern int __blocking_notifier_call_chain(struct blocking_notifier_head *nh,
-				   unsigned long val, void *v,
-				   int nr_to_call, int *nr_calls);
-
-extern int blocking_notifier_call_chain(struct blocking_notifier_head *nh,
-		unsigned long val, void *v);
-
-#if defined(CONFIG_MACH_U8500_LOTUS) || defined(CONFIG_MACH_U8500_PEPPER) || defined(CONFIG_MACH_U8500_NYPON) || defined(CONFIG_MACH_U8500_KUMQUAT)
-int (*usermodehelper_disable_k)(void) = (void *)0xc00b2b24;
-void (*syscore_shutdown_k)(void) = (void *)0xc02e2328;
-#else
-#error please searh in cat /proc/kallsyms for syscore_shutdown and usermodehelper_disable!! If you can not see offsets, than do echo 1 > /proc/sys/kernel/kptr_restrict
-#endif
-
-void kernel_restart_prepare_k(char *cmd)
-{
-	blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, cmd);
-	system_state = SYSTEM_RESTART;
-	usermodehelper_disable_k();
-	device_shutdown();
-	syscore_shutdown_k();
-}
-
 /*
  * Reboot system call: for obvious reasons only root may call it,
  * and even root needs to set up some magic numbers in the registers
