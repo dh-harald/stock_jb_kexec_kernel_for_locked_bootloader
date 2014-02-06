@@ -73,13 +73,19 @@ int procfile_read(char *buffer,
 			 char **buffer_location,
 			 off_t offset, int buffer_length, int *eof, void *data)
 {
-	int ret;
+	int ret, i;
 	printk(KERN_INFO "procfs_rw: procfile_read (/proc/%s) called\n", PROCFS_NAME);
 
 	if (offset > 0)
 		ret = 0;
 	else {
 		memcpy(buffer, procfs_buffer, procfs_buffer_size);
+
+		if (procfs_buffer_size)
+			printk("Atags: %s\n", procfs_buffer);
+		else
+			printk("/proc/atags is empty!\n");
+
 		ret = procfs_buffer_size;
 	}
 
@@ -1118,9 +1124,9 @@ __initcall(memblock_init_debugfs);
 	40080000-40081fff : lcla_esram
 	80004000-80004fff : nmk-i2c.0
 */
-/* lets try with wroking kexec hardboot address */
-#define KEXEC_HARDBOOT_START	0x1FE00000
-#define KEXEC_HARDBOOT_SIZE	(SZ_1M)
+/* lets use ram_console space for storing hardboot atags :) */
+#define KEXEC_HARDBOOT_START	0x1FFE0000
+#define KEXEC_HARDBOOT_SIZE	(0x20000000 - KEXEC_HARDBOOT_START - 1)
 
 static struct resource kexec_hardboot_resources[] = {
 	[0] = {
@@ -1137,7 +1143,7 @@ static struct platform_device kexec_hardboot_device = {
 
 static void kexec_hardboot_reserve(void) {
 	memblock_init();
-
+/*
 	if (memblock_reserve(KEXEC_HARDBOOT_START, KEXEC_HARDBOOT_SIZE)) {
 		printk(KERN_ERR "Failed to reserve memory for KEXEC_HARDBOOT: "
 				 "with size 0x%X at 0x%.8X\n",
@@ -1147,7 +1153,7 @@ static void kexec_hardboot_reserve(void) {
 	else
 		printk("Kexec hardboot mem space with size 0x%X at 0x%.8X allocated successful.\n",
 				 KEXEC_HARDBOOT_SIZE, KEXEC_HARDBOOT_START);
-
+*/
 	memblock_free(KEXEC_HARDBOOT_START, KEXEC_HARDBOOT_SIZE);
 	memblock_remove(KEXEC_HARDBOOT_START, KEXEC_HARDBOOT_SIZE);
 
