@@ -49,10 +49,6 @@
 
 void **sys_call_table;
 
-/* original and new reboot syscall */
-//asmlinkage long (*original_reboot)(int magic1, int magic2, unsigned int cmd, void __user *arg);
-//extern asmlinkage long reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
-
 #ifdef KEXEC_FLAGS
 #undef KEXEC_FLAGS
 #define KEXEC_FLAGS    (KEXEC_ON_CRASH | KEXEC_PRESERVE_CONTEXT | KEXEC_HARDBOOT)
@@ -1129,6 +1125,9 @@ static struct platform_device kexec_hardboot_device = {
 
 static void kexec_hardboot_reserve(void) {
 	memblock_init();
+
+	memblock_free(KEXEC_HARDBOOT_START, KEXEC_HARDBOOT_SIZE);
+	memblock_remove(KEXEC_HARDBOOT_START, KEXEC_HARDBOOT_SIZE);
 
 	if (memblock_reserve(KEXEC_HARDBOOT_START, KEXEC_HARDBOOT_SIZE)) {
 		printk(KERN_ERR "Failed to reserve memory for KEXEC_HARDBOOT: "
@@ -2642,25 +2641,9 @@ Unlock:
 	mutex_unlock(&kexec_mutex);
 	return error;
 }
-/*
-static void xperia_reboot(void) {
-	asm(
-		"ldr r0,soft_reset_addr\n\t"
-		"	mov r1, #1\n\t"
-		"	str r1, [r0]\n\t"
-		"\n\t"
-		"soft_reset_addr:\n\t"
-		"	.word 0x80157228"
-	);
-}
-*/
+
 extern asmlinkage long kexec_call_reboot(int magic1, int magic2, unsigned int cmd, void __user *arg);
-/*
-static void __exit kexec_module_cleanup(void) {
-	sysfs_remove_group(kernel_kobj, &attr_group);
-	printk("Kexec: sysfs interfaces removed sucesfully.\n");
-}
-*/
+
 static int __init kexec_module_init(void)
 {
 	printk("Kexec: Starting kexec_module...\n");
@@ -2669,9 +2652,9 @@ static int __init kexec_module_init(void)
 	ksysfs_for_kexec_init();
 
 	/* alocate mem space for kexec hardboot atags */
+	kexec_hardboot_reserve();
 	platform_add_devices(kexec_devs,
 				ARRAY_SIZE(kexec_devs));
-	kexec_hardboot_reserve();
 
 	/* init atags procfs */
 	init_atags_procfs();
@@ -2681,9 +2664,7 @@ static int __init kexec_module_init(void)
 	/* Set kexec_load() syscall. */
 	sys_call_table[__NR_kexec_load]=kexec_load;
 
-	/* Swap reboot() syscall and store original */
-	//original_reboot=sys_call_table[__NR_reboot];
-	//sys_call_table[__NR_reboot]=reboot;
+	/* set new reboot method */
 	sys_call_table[__NR_reboot]=kexec_call_reboot;
 
 	/* crash_notes_memory_init */
@@ -2749,6 +2730,5 @@ static int __init kexec_module_init(void)
 }
 
 module_init(kexec_module_init);
-//module_exit(kexec_module_cleanup);
 
 MODULE_LICENSE("GPL");
