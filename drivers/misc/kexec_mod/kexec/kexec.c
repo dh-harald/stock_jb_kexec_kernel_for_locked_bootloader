@@ -1055,8 +1055,6 @@ void __init memblock_init(void)
 	memblock.current_limit = MEMBLOCK_ALLOC_ANYWHERE;
 }
 
-memblock_debug = 1;
-
 #if defined(CONFIG_DEBUG_FS) && !defined(ARCH_DISCARD_MEMBLOCK)
 
 static int memblock_debug_show(struct seq_file *m, void *private)
@@ -1092,18 +1090,6 @@ static const struct file_operations memblock_debug_fops = {
 	.llseek = seq_lseek,
 	.release = single_release,
 };
-
-static int __init memblock_init_debugfs(void)
-{
-	struct dentry *root = debugfs_create_dir("memblock", NULL);
-	if (!root)
-		return -ENXIO;
-	debugfs_create_file("memory", S_IRUGO, root, &memblock.memory, &memblock_debug_fops);
-	debugfs_create_file("reserved", S_IRUGO, root, &memblock.reserved, &memblock_debug_fops);
-
-	return 0;
-}
-__initcall(memblock_init_debugfs);
 
 #endif /* CONFIG_DEBUG_FS */
 
